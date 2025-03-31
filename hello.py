@@ -66,17 +66,7 @@ def handle_duplicates_and_sort(data_1, data_2, lipid=True):
 
 def plot_linearity(data_1, data_2, exp1, exp2, mri_param = 'R1 (1/sec)',lipid = True):
     to_show = {True: 'Lipid type', False: 'Iron type'}
-    # # Create a scatter plot for the data, the x axis is the R1 (1/sec) of data_1, and the y axis is the R1 (1/sec) of data_12.
-    # # The title of the plot is "R1 (1/sec) of data_1 vs. R1 (1/sec) of data_12"
-    # # The x axis label is "R1 (1/sec) of data_1" and the y axis label is "R1 (1/sec) of data_12".
-    plt.figure(figsize=(10, 6))
-    plt.scatter(data_1[mri_param], data_2[mri_param], alpha=0.5)
-    plt.title(f'{mri_param} of {exp1} vs. {mri_param} of {exp2} - for {data_1[to_show[lipid]].iloc[0]}')
-    plt.xlabel(f'{mri_param} of {exp1}')
-    plt.ylabel(f'{mri_param} of {exp2}')
-    plt.grid(True)
-    plt.show()
-    # create plot directory
+        # create plot directory
     plot_dir = 'plots'
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
@@ -92,7 +82,17 @@ def plot_linearity(data_1, data_2, exp1, exp2, mri_param = 'R1 (1/sec)',lipid = 
         plot_dir = f'{plot_dir}/iron'
     # save plot
     filename = f"{mri_param}_{exp1}_vs_{exp2}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
+    # # Create a scatter plot for the data, the x axis is the R1 (1/sec) of data_1, and the y axis is the R1 (1/sec) of data_12.
+    # # The title of the plot is "R1 (1/sec) of data_1 vs. R1 (1/sec) of data_12"
+    # # The x axis label is "R1 (1/sec) of data_1" and the y axis label is "R1 (1/sec) of data_12".
+    plt.figure(figsize=(10, 6))
+    plt.scatter(data_1[mri_param], data_2[mri_param], alpha=0.5)
+    plt.title(f'{mri_param} of {exp1} vs. {mri_param} of {exp2} - for {data_1[to_show[lipid]].iloc[0]}')
+    plt.xlabel(f'{mri_param} of {exp1}')
+    plt.ylabel(f'{mri_param} of {exp2}')
+    plt.grid(True)
     plt.savefig(os.path.join(plot_dir, filename))
+    # plt.show()
     plt.close()
 
 
