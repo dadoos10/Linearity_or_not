@@ -14,8 +14,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 from toolBox import *
-import read_xlsx
 
 def extract_zero_com_exp(exp = 1, data = None, lipid = False):
     """
@@ -76,6 +76,25 @@ def plot_linearity(data_1, data_2, exp1, exp2, mri_param = 'R1 (1/sec)',lipid = 
     plt.ylabel(f'{mri_param} of {exp2}')
     plt.grid(True)
     plt.show()
+    # create plot directory
+    plot_dir = 'plots'
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    if lipid:
+        # create lipid directory
+        if not os.path.exists(f'{plot_dir}/lipid'):
+            os.makedirs(f'{plot_dir}/lipid')
+        plot_dir = f'{plot_dir}/lipid'
+    else:
+        # create iron directory
+        if not os.path.exists(f'{plot_dir}/iron'):
+            os.makedirs(f'{plot_dir}/iron')
+        plot_dir = f'{plot_dir}/iron'
+    # save plot
+    filename = f"{mri_param}_{exp1}_vs_{exp2}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
+    plt.savefig(os.path.join(plot_dir, filename))
+    plt.close()
+
 
 def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
     data_1 =  extract_zero_com_exp(exps_pair[0], data, lipid)
@@ -89,8 +108,8 @@ if __name__ == "__main__":
     # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
     exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
-    # for lipid_pair in exp_lipid_pairs_to_check:
-    #     run_test_retest(data,lipid_pair)
+    for lipid_pair in exp_lipid_pairs_to_check:
+        run_test_retest(data,lipid_pair)
 
     exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
     for iron_pair in exp_iron_pairs_to_check:
