@@ -158,6 +158,7 @@ def plot_qMRI_to_bio(data, data_2, R1, lipid = True):
         plot_dir = f'plots/iron/{param_name}'
     filename = f"{param_name}_pure {tissue_type}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
     save_file(plot_dir, filename)
+    return rmse_fitted, scan_rescan_rmse
     
 def create_nested_dir(dir_path):
     """Create nested directories one by one if they don't exist."""
@@ -180,6 +181,11 @@ def save_file(plot_dir, filename):
 
 
 def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
+    rmse_table = pd.DataFrame(
+        data=0.0, 
+        index=qMRI_params, 
+        columns=["Fitted RMSE", "Scan-Rescan RMSE"]
+    )
     for i in range(len(exps_pair)):
         # define data_2 as the i experiment
         data_2 = extract_zero_com_exp(exps_pair[i], data, lipid)
@@ -192,7 +198,15 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
 
         # data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
         for param in qMRI_params:
-            plot_qMRI_to_bio(data_1, data_2, param, lipid = lipid)
+            rmse_fitted, scan_rescan_rmse =  plot_qMRI_to_bio(data_1, data_2, param, lipid = lipid)
+            rmse_table.loc[param, "Fitted RMSE"] += rmse_fitted
+            rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
+            print(rmse_table)
+
+    rmse_table /= len(exps_pair)
+    rmse_table = rmse_table.round(3)
+
+    print(rmse_table)
 
     # for data_2 plot the R1 (1/sec) of data_2 vs. MTV (fraction)
     # plot_linearity(data_1, data_2, exps_pair[0], exps_pair[1],MRI_param,lipid = lipid)
