@@ -6,8 +6,8 @@ PC_pair = (2,5)
 
 #lipid set to check
 PC_Cholest_all = [1,6,12]
-PC_SM_all = [3,4,7,9,10,11,13,14]
-PC_all = [2,5,15]
+PC_SM_all = [3,4,7,9,10,13]
+PC_all = [2,5]
 
 
 

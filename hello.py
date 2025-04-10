@@ -15,6 +15,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 from toolBox import *
+from sklearn.metrics import mean_squared_error
+
 
 def extract_zero_com_exp(exp = 1, data = None, lipid = False):
     """
@@ -29,6 +31,26 @@ def extract_zero_com_exp(exp = 1, data = None, lipid = False):
     else:
         return data[(data['ExpNum'] == exp) & (data['Lipid (fraction)'] == 0)]
 
+
+
+
+def group_and_mean(data_1, data_2, column_name):
+    # Group by ExpNum and column_name, calculating the mean for only the qMRI_params columns
+    data_1_qMRI = data_1.groupby(["ExpNum", column_name], as_index=False)[qMRI_params].mean(numeric_only=True)
+    data_2_qMRI = data_2.groupby(["ExpNum", column_name], as_index=False)[qMRI_params].mean(numeric_only=True)
+
+    # Keep non-numeric columns (if any), retaining the first value for each group (or you can use .last() instead)
+    non_qMRI_columns = [col for col in data_1.columns if col not in qMRI_params]
+
+    # Group by ExpNum and column_name, and take the first value for non-numeric columns
+    data_1_non_qMRI = data_1.groupby(["ExpNum", column_name], as_index=False)[non_qMRI_columns].first()
+    data_2_non_qMRI = data_2.groupby(["ExpNum", column_name], as_index=False)[non_qMRI_columns].first()
+
+    # Merge the mean qMRI_params with the non-numeric columns
+    data_1_final = pd.merge(data_1_qMRI, data_1_non_qMRI, on=["ExpNum", column_name])
+    data_2_final = pd.merge(data_2_qMRI, data_2_non_qMRI, on=["ExpNum", column_name])
+    return data_1_final, data_2_final
+
 def handle_duplicates_and_sort(data_1, data_2, lipid=True):
     """
     Handles duplicates and sorts data by Lipid fraction or Fe values.
@@ -38,24 +60,20 @@ def handle_duplicates_and_sort(data_1, data_2, lipid=True):
     :param lipid: Boolean flag to choose column (True for Lipid fraction, False for Fe)
     :return: Processed data_1 and data_2
     """
-    # Print first 6 columns of data_1 and data_2
-    print(f"data_1: \n{data_1.iloc[:, :6]}.\n data_2: \n{data_2.iloc[:, :6]}")
-
     subset = {True: ['Lipid (fraction)'], False: ['[Fe] (mg/ml)']}
     column_name = subset[lipid][0]  # Extract the correct column name
+    
 
-    # Drop duplicates based on the selected column
-    data_1 = data_1.drop_duplicates(subset=column_name, keep='first')
-    data_2 = data_2.drop_duplicates(subset=column_name, keep='first')
+    data_1, data_2 = group_and_mean(data_1, data_2, column_name)
 
-    # Ensure both datasets have rows in common based on the selected column
-    common_values = pd.merge(data_1, data_2, on=column_name, how='inner')[column_name]
+    # # Ensure both datasets have rows in common based on the selected column
+    # common_values = pd.merge(data_1, data_2, on=column_name, how='inner')[column_name]
 
-    # Filter to keep only common values
-    data_1 = data_1[data_1[column_name].isin(common_values)]
-    data_2 = data_2[data_2[column_name].isin(common_values)]
+    # # Filter to keep only common values
+    # data_1 = data_1[data_1[column_name].isin(common_values)]
+    # data_2 = data_2[data_2[column_name].isin(common_values)]
 
-    print(f"Filtered data_1: \n{data_1}.\nFiltered data_2: \n{data_2}")
+    # print(f"Filtered data_1: \n{data_1}.\nFiltered data_2: \n{data_2}")
 
     # Sort datasets by the selected column
     data_1 = data_1.sort_values(by=column_name)
@@ -106,7 +124,7 @@ def calc_scan_rescan_rmse(data, data_2, R1):
     scan_rescan_rmse = np.sqrt(np.mean((data[R1].values - data_2[R1].values) ** 2))
     return scan_rescan_rmse
 
-def plot_qMRI_to_bio(data, data_2, R1, lipid = True):
+def plot_qMRI_to_bio(data, data_2, R1, exps_pair,i,lipid = True):
     if lipid:
         tissue_col = "Lipid (fraction)"
         tissue_type = data["Lipid type"].iloc[0]
@@ -128,27 +146,36 @@ def plot_qMRI_to_bio(data, data_2, R1, lipid = True):
     scatter1 = plt.scatter(x, y, alpha=0.5, color='blue')  # Data 1
     scatter2 = plt.scatter(data_2[tissue_col], data_2[R1], alpha=0.5, color='green')  # Data 2
     line = plt.plot(x, linear_fit(x), color='red')  # Regression line
-
+    print(f"{tissue_type} ################################")
     # Add legend manually
-    plt.legend([scatter1, scatter2, line[0]], [f"exp # {data["ExpNum"].iloc[0]}", f"exp # {data_2["ExpNum"].iloc[0]}", f"Linear fit of {data["ExpNum"].iloc[0]}"])
+    others = [x for x in range(len(exps_pair)) if x != i]
+    # Create a string of experiment numbers from `others`, joined by commas
+    others_str = ', '.join([f"exp # {exps_pair[x]}" for x in others])
+    plt.legend([scatter1, scatter2, line[0]], [f"{others_str}", f"exp # {exps_pair[i]}", f"Linear fit of {data["ExpNum"].iloc[0]}"])
 
     # Labels and title
     plt.xlabel(tissue_col)
     plt.ylabel(R1)
 
-    # Compute RMSEs
+
+    # Calculate RMSEs
     scan_rescan_rmse = calc_scan_rescan_rmse(data, data_2, R1)
 
-    y_predicted = linear_fit(data_2[tissue_col])
-    rmse_fitted = np.sqrt(np.mean((data_2[R1].values - y_predicted) ** 2))
+    y_on_line = linear_fit(data_2[tissue_col])  # The "ideal" y values on the line
+    y_actual = data_2[R1]
+    print(f"{R1}, {y_actual}, {y_on_line}, tissue_col: {tissue_col}")
+    if len(y_actual) == 0 or len(y_on_line) == 0:
+        rmse_fitted = -10
+    else:
+        rmse_fitted = np.sqrt(mean_squared_error(y_actual, y_on_line))
 
     # Print RMSEs
     print(f'RMSE for the fitted line (data_1): {rmse_fitted:.4f}')
-    print(f'Scan–rescan RMSE: {scan_rescan_rmse:.4f}')
+    # print(f'Scan–rescan RMSE: {scan_rescan_rmse:.4f}')
 
     param_name = R1.split(" ")[0]
     # Final plot details
-    plt.title(f'{param_name} vs. {tissue_col}, {tissue_type}\nScan–rescan RMSE: {scan_rescan_rmse:.2f}, RMSE (fit): {rmse_fitted:.2f}')
+    plt.title(f'{param_name} vs. {tissue_col}, {tissue_type}\n RMSE (fit): {rmse_fitted:.2f}')
     plt.grid(True)
 
     to_show = {True: 'Lipid type', False: 'Iron type'}
@@ -188,6 +215,7 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
     )
     for i in range(len(exps_pair)):
         # define data_2 as the i experiment
+
         data_2 = extract_zero_com_exp(exps_pair[i], data, lipid)
         # create data_1 from all other experiments except i
         data_1_list = [
@@ -196,11 +224,11 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
         ]
         data_1 = pd.concat(data_1_list, ignore_index=True)
 
-        # data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
+        data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
         for param in qMRI_params:
-            rmse_fitted, scan_rescan_rmse =  plot_qMRI_to_bio(data_1, data_2, param, lipid = lipid)
+            rmse_fitted, scan_rescan_rmse =  plot_qMRI_to_bio(data_1, data_2, param, exps_pair,i, lipid = lipid)
             rmse_table.loc[param, "Fitted RMSE"] += rmse_fitted
-            rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
+            # rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
             print(rmse_table)
 
     rmse_table /= len(exps_pair)
@@ -216,7 +244,7 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
 if __name__ == "__main__":
     # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
-    exp_lipid_all_to_check  = [PC_Cholest_all,PC_SM_all,PC_all]
+    exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
     exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
 
 
