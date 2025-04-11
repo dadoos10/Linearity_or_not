@@ -142,20 +142,24 @@ def plot_qMRI_to_bio(data, data_2, R1, exps_pair,i,lipid = True):
     coefficients = np.polyfit(x, y, 1)
     linear_fit = np.poly1d(coefficients)
 
+
+    # Create new figure
+    fig, ax = plt.subplots()
+
     # Prepare scatter and regression line
-    scatter1 = plt.scatter(x, y, alpha=0.5, color='blue')  # Data 1
-    scatter2 = plt.scatter(data_2[tissue_col], data_2[R1], alpha=0.5, color='green')  # Data 2
-    line = plt.plot(x, linear_fit(x), color='red')  # Regression line
+    scatter1 = ax.scatter(x, y, alpha=0.5, color='blue')  # Data 1
+    scatter2 = ax.scatter(data_2[tissue_col], data_2[R1], alpha=0.5, color='green')  # Data 2
+    line, = ax.plot(x, linear_fit(x), color='red')  # Regression line
     print(f"{tissue_type} ################################")
     # Add legend manually
     others = [x for x in range(len(exps_pair)) if x != i]
     # Create a string of experiment numbers from `others`, joined by commas
     others_str = ', '.join([f"exp # {exps_pair[x]}" for x in others])
-    plt.legend([scatter1, scatter2, line[0]], [f"{others_str}", f"exp # {exps_pair[i]}", f"Linear fit of {data["ExpNum"].iloc[0]}"])
+    ax.legend([scatter1, scatter2, line], [f"{others_str}", f"exp # {exps_pair[i]}", f"Linear fit of {data["ExpNum"].iloc[0]}"])
 
     # Labels and title
-    plt.xlabel(tissue_col)
-    plt.ylabel(R1)
+    ax.set_xlabel(tissue_col)
+    ax.set_ylabel(R1)
 
 
     # Calculate RMSEs
@@ -175,18 +179,18 @@ def plot_qMRI_to_bio(data, data_2, R1, exps_pair,i,lipid = True):
 
     param_name = R1.split(" ")[0]
     # Final plot details
-    plt.title(f'{param_name} vs. {tissue_col}, {tissue_type}\n RMSE (fit): {rmse_fitted:.2f}')
-    plt.grid(True)
+    ax.set_title(f'{param_name} vs. {tissue_col}, {tissue_type}\n RMSE (fit): {rmse_fitted:.2f}')
+    ax.grid(True)
+    return fig,ax,rmse_fitted, scan_rescan_rmse, (param_name, tissue_col, tissue_type)
 
-    to_show = {True: 'Lipid type', False: 'Iron type'}
+def define_dir_and_save(lipid, param_name, tissue_type):
     if lipid:
         plot_dir = f'plots/lipid/{param_name}'
     else:
         plot_dir = f'plots/iron/{param_name}'
     filename = f"{param_name}_pure {tissue_type}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
     save_file(plot_dir, filename)
-    return rmse_fitted, scan_rescan_rmse
-    
+
 def create_nested_dir(dir_path):
     """Create nested directories one by one if they don't exist."""
     current_path = ""
@@ -213,26 +217,33 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
         index=qMRI_params, 
         columns=["Fitted RMSE", "Scan-Rescan RMSE"]
     )
-    for i in range(len(exps_pair)):
-        # define data_2 as the i experiment
+    for param in qMRI_params:
+        for i in range(len(exps_pair)):
+            # define data_2 as the i experiment
 
-        data_2 = extract_zero_com_exp(exps_pair[i], data, lipid)
-        # create data_1 from all other experiments except i
-        data_1_list = [
-            extract_zero_com_exp(exps_pair[j], data, lipid)
-            for j in range(len(exps_pair)) if i != j
-        ]
-        data_1 = pd.concat(data_1_list, ignore_index=True)
+            data_2 = extract_zero_com_exp(exps_pair[i], data, lipid)
+            # create data_1 from all other experiments except i
+            data_1_list = [
+                extract_zero_com_exp(exps_pair[j], data, lipid)
+                for j in range(len(exps_pair)) if i != j
+            ]
+            data_1 = pd.concat(data_1_list, ignore_index=True)
 
-        data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
-        for param in qMRI_params:
-            rmse_fitted, scan_rescan_rmse =  plot_qMRI_to_bio(data_1, data_2, param, exps_pair,i, lipid = lipid)
+            data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
+                
+            fig,ax,rmse_fitted, scan_rescan_rmse, (param_name, tissue_col, tissue_type) =  plot_qMRI_to_bio(data_1, data_2, param, exps_pair,i, lipid = lipid)
             rmse_table.loc[param, "Fitted RMSE"] += rmse_fitted
-            # rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
-            print(rmse_table)
+        rmse_table /= len(exps_pair)
+        ax.set_title(f'{param_name} vs. {tissue_col}, {tissue_type}\n avergae RMSE (fit): {rmse_table.loc[param, "Fitted RMSE"]:.2f}')
+        define_dir_and_save(lipid, param_name, tissue_type)
 
-    rmse_table /= len(exps_pair)
-    rmse_table = rmse_table.round(3)
+            # rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
+            # print(rmse_table)
+
+
+    # Final plot details
+    # plt.title(f'{param_name} vs. {tissue_col}, {tissue_type}\n RMSE (fit): {rmse_fitted:.2f}')
+    # plt.grid(True)
 
     print(rmse_table)
 
