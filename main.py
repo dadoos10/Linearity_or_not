@@ -14,6 +14,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import pickle
 from toolBox import *
 from sklearn.metrics import mean_squared_error
 
@@ -27,9 +28,10 @@ def extract_zero_com_exp(exp = 1, data = None, lipid = False):
     :return: DataFrame with the extracted data
     """
     if lipid:
-        return data[(data['ExpNum'] == exp) & (data['[Fe] (mg/ml)'] == 0)]
+        #
+        return data[(data['ExpNum'] == exp) & (data['[Fe] (mg/ml)'] == 0) & (data['[Protein](mg/ml)'] == 0)] 
     else:
-        return data[(data['ExpNum'] == exp) & (data['Lipid (fraction)'] == 0)]
+        return data[(data['ExpNum'] == exp) & (data['Lipid (fraction)'] == 0) ]
 
 
 
@@ -208,16 +210,19 @@ def save_file(plot_dir, filename):
     """
     plot_dir = create_nested_dir(plot_dir)
     plt.savefig(os.path.join(plot_dir, filename))
+    fig_path = os.path.join(plot_dir, filename.replace('.png', '.fig.pickle'))
+    with open(fig_path, 'wb') as f:
+        pickle.dump(plt.gcf(), f)
     plt.close()
 
 
-def run_scan_rescan(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
+def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
     rmse_table = pd.DataFrame(
-        data=0.0, 
-        index=qMRI_params, 
-        columns=["Fitted RMSE", "Scan-Rescan RMSE"]
+        data={col: [[] for _ in range(len(qMRI_params))] for col in ["Fitted RMSE", "Scan-Rescan RMSE"]},
+        index=qMRI_params
     )
     for param in qMRI_params:
+        rmses = []
         for i in range(len(exps_pair)):
             # define data_2 as the i experiment
 
@@ -232,46 +237,82 @@ def run_scan_rescan(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
             data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
                 
             fig,ax,rmse_fitted, scan_rescan_rmse, (param_name, tissue_col, tissue_type) =  plot_qMRI_to_bio(data_1, data_2, param, exps_pair,i, lipid = lipid)
-            rmse_table.loc[param, "Fitted RMSE"] += rmse_fitted
-        rmse_table /= len(exps_pair)
-        ax.set_title(f'{param_name} vs. {tissue_col}, {tissue_type}\n avergae RMSE (fit): {rmse_table.loc[param, "Fitted RMSE"]:.2f}')
-        define_dir_and_save(lipid, param_name, tissue_type)
+            rmses.append(rmse_fitted)
+            # if isinstance(rmse_table.loc[param, "Fitted RMSE"], list):
+            #     rmse_table.loc[param, "Fitted RMSE"].append(rmse_fitted)
+            # else:
+            #     rmse_table.loc[param, "Fitted RMSE"] = [rmse_fitted]
 
+        # mean_rmse_fitted = np.mean(rmse_table.loc[param, "Fitted RMSE"]) if rmse_table.loc[param, "Fitted RMSE"] else 0
+        mean_rmse_fitted = np.mean(rmses) if rmses else 0
+        ax.set_title(f'{param_name} vs. {tissue_col}, {tissue_type}\n average RMSE (fit): {mean_rmse_fitted:.2f}')
+        define_dir_and_save(lipid, param_name, tissue_type)
+        rmse_dict.setdefault(param, []).append((tissue_type, rmses))
             # rmse_table.loc[param, "Scan-Rescan RMSE"] += scan_rescan_rmse
             # print(rmse_table)
+    return rmse_dict
 
-
-    # Final plot details
-    # plt.title(f'{param_name} vs. {tissue_col}, {tissue_type}\n RMSE (fit): {rmse_fitted:.2f}')
-    # plt.grid(True)
-
-    print(rmse_table)
-
-    # for data_2 plot the R1 (1/sec) of data_2 vs. MTV (fraction)
-    # plot_linearity(data_1, data_2, exps_pair[0], exps_pair[1],MRI_param,lipid = lipid)
-
-
-# main function
-if __name__ == "__main__":
-    # # Read the data file into a pandas dataframe
-    data = pd.read_excel('data.xlsx', sheet_name=0)
-    # if "expNum" col contain letter, remove rows with letter
-    data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
+def pure_components(data):
     exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
     exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
 
 
     exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
     exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
-
+    rmse_dict = {}
     for iron_pair in exp_iron_all_to_check:
-        run_scan_rescan(data,iron_pair, lipid = False)
+        rmse_dict = run_scan_rescan(data,iron_pair, rmse_dict,lipid = False)
+    # plot the RMSEes for each rmse_dict
+    plt.close('all')
+    plt.clf()
+
+    for param, values in rmse_dict.items():
+        #create a boxplot for each param, the title of the barplot is the param name, and the y axis is the RMSE values.
+        
+        plt.figure(figsize=(10, 6))
+        plt.title(f'RMSE for {param}')
+        plt.boxplot([x[1] for x in values], tick_labels=[x[0] for x in values])
+        plt.ylabel('RMSE')
+        plt.xlabel('Tissue type')
+        plt.grid(True)
+        plt.show()
+        # plt.close()
+    rmse_dict = {}
+    print("sssssssssssssssssssssssssssssssssssssssssss")
+            
 
     for lipid_pair in exp_lipid_all_to_check:
-        run_scan_rescan(data,lipid_pair)
+        rmse_dict = run_scan_rescan(data,lipid_pair,rmse_dict)
+    plt.close('all')
 
-
-
+    for param, values in rmse_dict.items():
+        #create a boxplot for each param, the title of the barplot is the param name, and the y axis is the RMSE values.
+        plt.figure(figsize=(10, 6))
+        plt.title(f'RMSE for {param}')
+        plt.boxplot([x[1] for x in values], tick_labels=[x[0] for x in values])
+        plt.ylabel('RMSE')
+        plt.xlabel('Tissue type')
+        plt.grid(True)
+        plt.show()
+        # plt.close()
     
+
+if __name__ == "__main__":
+    # # Read the data file into a pandas dataframe
+    data = pd.read_excel('data.xlsx', sheet_name=0)
+    # Remove Oshrat experiments
+    data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
+    # Check pure components 
+    pure_components(data)
+
+    # Check conbinations of components
+
+
+
+
+
+
+
+
 
 
