@@ -17,6 +17,8 @@ import os
 import pickle
 from toolBox import *
 from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import KFold
+from sklearn.linear_model import LinearRegression
 
 
 def extract_zero_com_exp(exp = 1, data = None, lipid = False):
@@ -252,17 +254,8 @@ def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
             # print(rmse_table)
     return rmse_dict
 
-def pure_components(data):
-    exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
-    exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
-
-
-    exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
-    exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
-    rmse_dict = {}
-    for iron_pair in exp_iron_all_to_check:
-        rmse_dict = run_scan_rescan(data,iron_pair, rmse_dict,lipid = False)
-    # plot the RMSEes for each rmse_dict
+def dict_to_boxplot(rmse_dict):
+     # plot the RMSEes for each rmse_dict
     plt.close('all')
     plt.clf()
 
@@ -276,26 +269,79 @@ def pure_components(data):
         plt.xlabel('Tissue type')
         plt.grid(True)
         plt.show()
-        # plt.close()
-    rmse_dict = {}
-    print("sssssssssssssssssssssssssssssssssssssssssss")
-            
+        plt.close()
 
+def pure_components(data):
+    exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
+    exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
+
+
+    exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
+    exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
+    rmse_dict = {}
+    for iron_pair in exp_iron_all_to_check:
+        rmse_dict = run_scan_rescan(data,iron_pair, rmse_dict,lipid = False)
+    
+    dict_to_boxplot(rmse_dict)
+    rmse_dict = {}
+   
     for lipid_pair in exp_lipid_all_to_check:
         rmse_dict = run_scan_rescan(data,lipid_pair,rmse_dict)
-    plt.close('all')
 
-    for param, values in rmse_dict.items():
-        #create a boxplot for each param, the title of the barplot is the param name, and the y axis is the RMSE values.
-        plt.figure(figsize=(10, 6))
-        plt.title(f'RMSE for {param}')
-        plt.boxplot([x[1] for x in values], tick_labels=[x[0] for x in values])
-        plt.ylabel('RMSE')
-        plt.xlabel('Tissue type')
-        plt.grid(True)
-        plt.show()
-        # plt.close()
+    dict_to_boxplot(rmse_dict)
+
+def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
+    """
+    Perform k-fold cross-validation to fit a model and calculate RMSE.
     
+    :param data: DataFrame containing the data
+    :param X_cols: List of feature columns
+    :param y_col: Target column
+    :param k: Number of folds (default is 5)
+    :return: RMSE for each fold
+    """
+    kf = KFold(n_splits=k, shuffle=True, random_state=42)
+    rmse_list = []
+
+    for train_index, test_index in kf.split(data):
+        X_train, X_test = data[X_cols].iloc[train_index], data[X_cols].iloc[test_index]
+        y_train, y_test = data[y_col].iloc[train_index], data[y_col].iloc[test_index]
+
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+
+        y_pred = model.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        rmse_list.append(rmse)
+
+    return rmse_list
+
+def multiple_components(data):
+    #for each expNum, print header of the dataframe, and the data frame itself.
+    for param in qMRI_params:
+        for expNum in data['ExpNum'].unique():
+            # only lipid
+            x_cols = ['Lipid (fraction)']
+            rMSE_lipid =  kfoldCV_fit_model(data[data['ExpNum'] == expNum], x_cols, param)
+            # only iron
+            x_cols = ['[Fe] (mg/ml)']
+            rMSE_iron =  kfoldCV_fit_model(data[data['ExpNum'] == expNum], x_cols, param)
+            # lipid,iron
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
+            rMSE_lipid_iron =  kfoldCV_fit_model(data[data['ExpNum'] == expNum],x_cols, param)
+            # lipid and lipid*iron
+            # first create a new column in the data frame, that is the product of the lipid and iron columns.
+            data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
+            rMSE_lipid_iron_interaction =  kfoldCV_fit_model(data[data['ExpNum'] == expNum],x_cols, param)
+            # boxplot the RMSEs
+            plt.figure(figsize=(10, 6))
+            plt.title(f'RMSE for expNum {expNum}, {param}')
+            plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=['Lipid',"iron", 'Lipid+Iron', 'Lipid*Iron'])
+            plt.ylabel('RMSE')
+            plt.xlabel('Model')
+            plt.grid(True)
+            plt.show()
 
 if __name__ == "__main__":
     # # Read the data file into a pandas dataframe
@@ -303,9 +349,13 @@ if __name__ == "__main__":
     # Remove Oshrat experiments
     data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
     # Check pure components 
-    pure_components(data)
+    # pure_components(data)
+
+    # Check multiple components
+    multiple_components(data)
 
     # Check conbinations of components
+
 
 
 
