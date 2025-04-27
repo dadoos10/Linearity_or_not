@@ -155,7 +155,7 @@ def plot_qMRI_to_bio(data, data_2, R1, exps_pair,i,lipid = True):
     others = [x for x in range(len(exps_pair)) if x != i]
     # Create a string of experiment numbers from `others`, joined by commas
     others_str = ', '.join([f"exp # {exps_pair[x]}" for x in others])
-    ax.legend([scatter1, scatter2, line], [f"{others_str}", f"exp # {exps_pair[i]}", f"Linear fit of {data["ExpNum"].iloc[0]}"])
+    ax.legend([scatter1, scatter2, line], [f"{others_str}", f"exp # {exps_pair[i]}", f"Linear fit"])
 
     # Labels and title
     ax.set_xlabel(tissue_col)
