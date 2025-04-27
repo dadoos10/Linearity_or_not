@@ -1,5 +1,5 @@
 # Rona's Project:
-# In this project we research the linearity relationship between biological components to quantitative MRI (qMRI).
+# On this project we research the linearity relationship between biological components to quantitative MRI (qMRI).
 # it is well known (source!) that lypid and iron represent linear connection to qMRI parameters, seperatly. 
 # Here we want to ask if the combination of the two types represent linearity as well.
 # the players: 
@@ -211,7 +211,7 @@ def save_file(plot_dir, filename):
     plt.close()
 
 
-def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
+def run_scan_rescan(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
     rmse_table = pd.DataFrame(
         data=0.0, 
         index=qMRI_params, 
@@ -255,17 +255,20 @@ def run_test_retest(data,exps_pair,MRI_param = 'R1 (1/sec)',lipid = True):
 if __name__ == "__main__":
     # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
+    # if "expNum" col contain letter, remove rows with letter
+    data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
     exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
     exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
 
 
     exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
     exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
+
     for iron_pair in exp_iron_all_to_check:
-        run_test_retest(data,iron_pair, lipid = False)
+        run_scan_rescan(data,iron_pair, lipid = False)
 
     for lipid_pair in exp_lipid_all_to_check:
-        run_test_retest(data,lipid_pair)
+        run_scan_rescan(data,lipid_pair)
 
 
 
