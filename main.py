@@ -301,6 +301,8 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
     :return: RMSE for each fold
     """
     kf = KFold(n_splits=k, shuffle=True, random_state=42)
+    # initialize an empty list with wheits of the model
+    weights = np.zeros(len(X_cols))
     rmse_list = []
 
     for train_index, test_index in kf.split(data):
@@ -309,12 +311,13 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
 
         model = LinearRegression()
         model.fit(X_train, y_train)
-
+        # Get the weights of the model
+        weights += model.coef_
         y_pred = model.predict(X_test)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         rmse_list.append(rmse)
-
-    return rmse_list
+    weights /= k  # Average the weights over k folds
+    return rmse_list, weights
 
 def multiple_components(data):
     #for each expNum, print header of the dataframe, and the data frame itself.
@@ -324,18 +327,18 @@ def multiple_components(data):
             cur_data = data[data['ExpNum'] == expNum]
             # only lipid
             x_cols = ['Lipid (fraction)']
-            rMSE_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
+            rMSE_lipid,weights_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
             # only iron
             x_cols = ['[Fe] (mg/ml)']
-            rMSE_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
+            rMSE_iron,weights_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
             # lipid,iron
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
-            rMSE_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
+            rMSE_lipid_iron,weights_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
             # lipid and lipid*iron
             # first create a new column in the data frame, that is the product of the lipid and iron columns.
             # data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
-            rMSE_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
+            rMSE_lipid_iron_interaction,weights_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
             iron_type = cur_data["Iron type"].iloc[0]
             lipid_type = cur_data["Lipid type"].iloc[0]
 
@@ -343,10 +346,24 @@ def multiple_components(data):
             plt.figure(figsize=(10, 6))
             plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}')
             plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=['Lipid',"iron", 'Lipid+Iron', 'Lipid*Iron'])
+            # add weights to the plot, under the tick labels
+            for i, weight in enumerate([weights_lipid,weights_iron,weights_lipid_iron,weights_lipid_iron_interaction]):
+                weight_text = ', '.join([f'{w:.2f}' for w in weight])  
+                plt.text(i+1, 0.04, f'Weights: {weight_text}', ha='center', va='bottom', fontsize=8)
             plt.ylabel('RMSE')
             plt.xlabel('Model')
             plt.grid(True)
-            plt.show()
+            # plt.show()
+            # save the plot in the directory 'plots/multiple_components/{expNum}'
+            plot_dir = f'plots/multiple_components/exp{expNum}'
+            if not os.path.exists(plot_dir):
+                os.makedirs(plot_dir)
+            filename = f"{param}_{expNum}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
+            plt.savefig(os.path.join(plot_dir, filename))
+            fig_path = os.path.join(plot_dir, filename.replace('.png', '.fig.pickle'))
+            with open(fig_path, 'wb') as f:
+                pickle.dump(plt.gcf(), f)
+            plt.close()
 
 if __name__ == "__main__":
     # # Read the data file into a pandas dataframe
