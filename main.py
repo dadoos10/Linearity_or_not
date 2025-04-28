@@ -318,25 +318,30 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
 
 def multiple_components(data):
     #for each expNum, print header of the dataframe, and the data frame itself.
+    data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
     for param in qMRI_params:
         for expNum in data['ExpNum'].unique():
+            cur_data = data[data['ExpNum'] == expNum]
             # only lipid
             x_cols = ['Lipid (fraction)']
-            rMSE_lipid =  kfoldCV_fit_model(data[data['ExpNum'] == expNum], x_cols, param)
+            rMSE_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
             # only iron
             x_cols = ['[Fe] (mg/ml)']
-            rMSE_iron =  kfoldCV_fit_model(data[data['ExpNum'] == expNum], x_cols, param)
+            rMSE_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
             # lipid,iron
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
-            rMSE_lipid_iron =  kfoldCV_fit_model(data[data['ExpNum'] == expNum],x_cols, param)
+            rMSE_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
             # lipid and lipid*iron
             # first create a new column in the data frame, that is the product of the lipid and iron columns.
-            data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
+            # data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
-            rMSE_lipid_iron_interaction =  kfoldCV_fit_model(data[data['ExpNum'] == expNum],x_cols, param)
+            rMSE_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
+            iron_type = cur_data["Iron type"].iloc[0]
+            lipid_type = cur_data["Lipid type"].iloc[0]
+
             # boxplot the RMSEs
             plt.figure(figsize=(10, 6))
-            plt.title(f'RMSE for expNum {expNum}, {param}')
+            plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}')
             plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=['Lipid',"iron", 'Lipid+Iron', 'Lipid*Iron'])
             plt.ylabel('RMSE')
             plt.xlabel('Model')
