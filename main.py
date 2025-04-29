@@ -317,7 +317,8 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         rmse_list.append(rmse)
     weights /= k  # Average the weights over k folds
-    return rmse_list, weights
+    rounded_weights = np.round(weights, 2)
+    return rmse_list, rounded_weights
 
 def multiple_components(data):
     #for each expNum, print header of the dataframe, and the data frame itself.
@@ -345,11 +346,12 @@ def multiple_components(data):
             # boxplot the RMSEs
             plt.figure(figsize=(10, 6))
             plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}')
-            plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=['Lipid',"iron", 'Lipid+Iron', 'Lipid*Iron'])
+            plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=[f"Lipid\n{weights_lipid}",f"iron\n{weights_iron}"
+                                                                                                           , f'Lipid+Iron\n{weights_lipid_iron}', f'Lipid*Iron\n{weights_lipid_iron_interaction}'])
             # add weights to the plot, under the tick labels
-            for i, weight in enumerate([weights_lipid,weights_iron,weights_lipid_iron,weights_lipid_iron_interaction]):
-                weight_text = ', '.join([f'{w:.2f}' for w in weight])  
-                plt.text(i+1, 0.04, f'Weights: {weight_text}', ha='center', va='bottom', fontsize=8)
+            # for i, weight in enumerate([weights_lipid,weights_iron,weights_lipid_iron,weights_lipid_iron_interaction]):
+            #     weight_text = ', '.join([f'{w:.2f}' for w in weight])  
+            #     plt.text(i+1, 0.04, f'Weights: {weight_text}', ha='center', va='bottom', fontsize=8)
             plt.ylabel('RMSE')
             plt.xlabel('Model')
             plt.grid(True)
@@ -363,9 +365,11 @@ def multiple_components(data):
             fig_path = os.path.join(plot_dir, filename.replace('.png', '.fig.pickle'))
             with open(fig_path, 'wb') as f:
                 pickle.dump(plt.gcf(), f)
+            # plt.show()
             plt.close()
 
 if __name__ == "__main__":
+    print("s")  
     # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
     # Remove Oshrat experiments
