@@ -19,6 +19,7 @@ from toolBox import *
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LinearRegression
+from collections import defaultdict
 
 
 def extract_zero_com_exp(exp = 1, data = None, lipid = False):
@@ -320,30 +321,8 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
     rounded_weights = np.round(weights, 2)
     return rmse_list, rounded_weights
 
-def multiple_components(data):
-    #for each expNum, print header of the dataframe, and the data frame itself.
-    data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
-    for param in qMRI_params:
-        for expNum in data['ExpNum'].unique():
-            cur_data = data[data['ExpNum'] == expNum]
-            # only lipid
-            x_cols = ['Lipid (fraction)']
-            rMSE_lipid,weights_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
-            # only iron
-            x_cols = ['[Fe] (mg/ml)']
-            rMSE_iron,weights_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
-            # lipid,iron
-            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
-            rMSE_lipid_iron,weights_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
-            # lipid and lipid*iron
-            # first create a new column in the data frame, that is the product of the lipid and iron columns.
-            # data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
-            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
-            rMSE_lipid_iron_interaction,weights_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
-            iron_type = cur_data["Iron type"].iloc[0]
-            lipid_type = cur_data["Lipid type"].iloc[0]
-
-            # boxplot the RMSEs
+def plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction):
+     # boxplot the RMSEs
             plt.figure(figsize=(10, 6))
             plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}')
             plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=[f"Lipid\n{weights_lipid}",f"iron\n{weights_iron}"
@@ -368,17 +347,102 @@ def multiple_components(data):
             # plt.show()
             plt.close()
 
+def multiple_components(data):
+    #for each expNum, print header of the dataframe, and the data frame itself.
+    data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
+    rmse_dict = defaultdict(list)  # key: (lipid_type, iron_type), value: list of 4 median RMSEs
+
+    for param in qMRI_params:
+        for expNum in data['ExpNum'].unique():
+            cur_data = data[data['ExpNum'] == expNum]
+            # only lipid
+            x_cols = ['Lipid (fraction)']
+            rMSE_lipid,weights_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
+            # only iron
+            x_cols = ['[Fe] (mg/ml)']
+            rMSE_iron,weights_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
+            # lipid,iron
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
+            rMSE_lipid_iron,weights_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
+            # lipid and lipid*iron
+            # first create a new column in the data frame, that is the product of the lipid and iron columns.
+            # data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
+            rMSE_lipid_iron_interaction,weights_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
+            iron_type = cur_data["Iron type"].iloc[0]
+            lipid_type = cur_data["Lipid type"].iloc[0]
+
+            # plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, 
+            #                rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction)
+           
+                        # Save median RMSEs for summary
+            medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
+            rmse_dict[(lipid_type, iron_type)].append(medians)
+    return rmse_dict
+
+def plot_summary_rmse(rmse_dict):
+    from collections import defaultdict
+
+    # Group by lipid type
+    grouped_data = defaultdict(list)  # lipid_type → list of (iron_type, avg_RMSEs)
+    for (lipid_type, iron_type), rmse_lists in rmse_dict.items():
+        avg_rmse = np.mean(rmse_lists, axis=0)
+        grouped_data[lipid_type].append((iron_type, avg_rmse))
+
+    # Marker styles for each model
+    model_labels = ['Lipid only', 'Iron only', 'Lipid+Iron', 'Lipid+Iron+Interaction']
+    markers = ['o', 's', '^', 'D']  # circle, square, triangle, diamond
+    colors = ['black', 'blue', 'green', 'red']
+
+    summary_dir = 'plots/summary'
+    os.makedirs(summary_dir, exist_ok=True)
+
+    for lipid_type, entries in grouped_data.items():
+        iron_types = [e[0] for e in entries]
+        rmse_values = np.array([e[1] for e in entries])  # shape: (num_iron_types, 4)
+        x = np.arange(len(iron_types))
+
+        plt.figure(figsize=(12, 6))
+
+        for i in range(4):  # for each model type
+            plt.scatter(
+                x + i * 0.1 - 0.15,  # small horizontal shift for separation
+                rmse_values[:, i],
+                marker=markers[i],
+                color=colors[i],
+                label=model_labels[i],
+                s=80  # marker size
+            )
+
+        plt.xticks(x, iron_types, rotation=45)
+        plt.ylabel('Median RMSE')
+        plt.title(f'Summary RMSE for Lipid Type: {lipid_type}')
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+
+        filename = f'summary_RMSE_{lipid_type}.png'.replace(" ", "_")
+        plt.savefig(os.path.join(summary_dir, filename))
+        plt.close()
+
+
+
+
 if __name__ == "__main__":
     print("s")  
     # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
     # Remove Oshrat experiments
     data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
+    data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11))]
     # Check pure components 
     # pure_components(data)
 
     # Check multiple components
-    multiple_components(data)
+    rmse_dict = multiple_components(data)
+    plot_summary_rmse(rmse_dict)
+    print("done")
+
 
     # Check conbinations of components
 
