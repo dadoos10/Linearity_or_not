@@ -275,10 +275,6 @@ def dict_to_boxplot(rmse_dict):
 def pure_components(data):
     exp_lipid_all_to_check  = [PC_all,PC_Cholest_all,PC_SM_all]
     exp_iron_all_to_check = [Fe2_all, Fe3_all, Ferittin_all, Tranferrin_all]
-
-
-    exp_lipid_pairs_to_check = [PC_Cholest_pair,PC_SM_pair,PC_pair]
-    exp_iron_pairs_to_check = [Fe2_pair, Fe3_pair, Ferittin_pair, Tranferrin_pair]
     rmse_dict = {}
     for iron_pair in exp_iron_all_to_check:
         rmse_dict = run_scan_rescan(data,iron_pair, rmse_dict,lipid = False)
@@ -378,14 +374,17 @@ def multiple_components(data):
                         # Save median RMSEs for summary
             medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
             rmse_dict[(lipid_type, iron_type)].append(medians)
-    return rmse_dict
+        plot_summary_rmse(rmse_dict,param)
 
-def plot_summary_rmse(rmse_dict):
+def plot_summary_rmse(rmse_dict,param):
     from collections import defaultdict
 
     # Group by lipid type
     grouped_data = defaultdict(list)  # lipid_type → list of (iron_type, avg_RMSEs)
     for (lipid_type, iron_type), rmse_lists in rmse_dict.items():
+        # # filter a littlebit
+        # if iron_type in ["Ferr+Trans", "Ferritin"]:
+        #     continue  # Skip these iron types
         avg_rmse = np.mean(rmse_lists, axis=0)
         grouped_data[lipid_type].append((iron_type, avg_rmse))
 
@@ -394,7 +393,7 @@ def plot_summary_rmse(rmse_dict):
     markers = ['o', 's', '^', 'D']  # circle, square, triangle, diamond
     colors = ['black', 'blue', 'green', 'red']
 
-    summary_dir = 'plots/summary'
+    summary_dir = f'plots/summary/{param}/'
     os.makedirs(summary_dir, exist_ok=True)
 
     for lipid_type, entries in grouped_data.items():
@@ -416,7 +415,7 @@ def plot_summary_rmse(rmse_dict):
 
         plt.xticks(x, iron_types, rotation=45)
         plt.ylabel('Median RMSE')
-        plt.title(f'Summary RMSE for Lipid Type: {lipid_type}')
+        plt.title(f'Summary RMSE for Lipid Type: {lipid_type}, {param}')
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
@@ -440,12 +439,8 @@ if __name__ == "__main__":
 
     # Check multiple components
     rmse_dict = multiple_components(data)
-    plot_summary_rmse(rmse_dict)
+    # plot_summary_rmse(rmse_dict)
     print("done")
-
-
-    # Check conbinations of components
-
 
 
 

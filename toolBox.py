@@ -29,6 +29,8 @@ R1 = 'R1 (1/sec)'
 R2s = 'R2s (1/sec)'
 MTV = 'MTV (fraction)'
 R2 = 'R2 (1/sec)'
-qMRI_params = [R1,MTV, R2, R2s]
+MT = 'MT (p.u.)'
+
+qMRI_params = [R1, R2, R2s, MT]
 _qMRI_params = [R1]
 
