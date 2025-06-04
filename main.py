@@ -20,6 +20,10 @@ from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import KFold
 from sklearn.linear_model import LinearRegression
 from collections import defaultdict
+from sklearn.metrics import root_mean_squared_error
+from scipy.io import savemat
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 
 def extract_zero_com_exp(exp = 1, data = None, lipid = False):
@@ -125,6 +129,7 @@ def calc_scan_rescan_rmse(data, data_2, R1):
     if len(data) != len(data_2):
         data, data_2 = make_datasets_same_size(data, data_2)
         return -10
+    return root_mean_squared_error((data[R1].values, data_2[R1].values)) # rRMSE!!
     # Compute RMSEs
     scan_rescan_rmse = np.sqrt(np.mean((data[R1].values - data_2[R1].values) ** 2))
     return scan_rescan_rmse
@@ -212,11 +217,37 @@ def save_file(plot_dir, filename):
     Save the plot to the specified directory with the given filename.
     """
     plot_dir = create_nested_dir(plot_dir)
-    plt.savefig(os.path.join(plot_dir, filename))
-    fig_path = os.path.join(plot_dir, filename.replace('.png', '.fig.pickle'))
-    with open(fig_path, 'wb') as f:
-        pickle.dump(plt.gcf(), f)
+    png_path = os.path.join(plot_dir, filename)
+    plt.savefig(png_path)
+    save_as_matlab_format(plot_dir, filename)
     plt.close()
+
+
+def save_as_matlab_format(plot_dir, filename):
+    """
+    Save current figure as .svg and raw .mat (x/y data for MATLAB).
+    """
+    fig = plt.gcf()
+    base_name = os.path.splitext(filename)[0]
+    fig_path = os.path.join(plot_dir, base_name)
+
+    fig.savefig(fig_path + ".pdf", bbox_inches='tight')
+
+    # Collect raw data from scatter and lines
+    xs, ys = [], []
+    ax = fig.axes[0]
+    for pc in ax.collections:  # scatterplot points
+        offsets = pc.get_offsets()
+        if offsets.size:
+            xs.extend(offsets[:, 0])
+            ys.extend(offsets[:, 1])
+    for line in ax.lines:      # line plot data
+        xs.extend(line.get_xdata())
+        ys.extend(line.get_ydata())
+
+    # Save as .mat if data was found
+    if xs:
+        savemat(fig_path + ".mat", {"x": xs, "y": ys})
 
 
 def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
@@ -424,30 +455,147 @@ def plot_summary_rmse(rmse_dict,param):
         plt.savefig(os.path.join(summary_dir, filename))
         plt.close()
 
+def sanitize_filename(filename):
+    """
+    Remove or replace characters that are invalid in filenames (especially on Windows).
+    """
+    import re
+    return re.sub(r'[<>:"/\\|?*\[\]\(\)\s]+', '_', filename)
 
+def plot_with_regression(data, x_col, y_col, group_col, title, xlabel, ylabel, plot_dir, filename_prefix, return_stats=False):
+    """
+    Plot y_col vs. x_col for each group in group_col, fit linear regression, and save the figure.
+
+    Parameters:
+    - data: DataFrame containing the data
+    - x_col, y_col: columns for X and Y axes
+    - group_col: column by which to group and color data (e.g., 'Lipid type', 'Iron type')
+    - title, xlabel, ylabel: plot labels
+    - plot_dir: directory to save the plot
+    - filename_prefix: filename base prefix for saving
+    """
+    stats = {}
+    plt.figure(figsize=(10, 6))
+    for group in data[group_col].dropna().unique():
+        subset = data[data[group_col] == group]
+        if subset.empty:
+            continue
+        x = subset[x_col].values.reshape(-1, 1)
+        y = subset[y_col].values
+        model = LinearRegression().fit(x, y)
+        y_pred = model.predict(x)
+        r2 = r2_score(y, y_pred)
+        slope = model.coef_[0]
+        intercept = model.intercept_
+        print(f"{y_col} | {group_col}: {group} | Slope: {slope:.4f}, Intercept: {intercept:.4f}, R²: {r2:.4f}")
+        sns.scatterplot(x=x.flatten(), y=y, label=f"{group}", alpha=0.5)
+        plt.plot(x.flatten(), y_pred, linestyle='--')
+        if return_stats:
+            stats[group] = (intercept, slope, r2)
+
+    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.grid(True)
+    plt.legend(title=group_col)
+    # os.makedirs(plot_dir, exist_ok=True)
+    filename = f"{sanitize_filename(filename_prefix)}-vs-{sanitize_filename(x_col)}.png"
+    save_file(plot_dir, filename)
+    if return_stats:
+        return stats
+
+def preanalysis(data):
+    all_stats = []
+    for param in qMRI_params:
+        # Plot vs. Lipid (fraction) when iron concentrations are zero
+        lipid_data = data[(data[Fe_protein_con] == 0) | (data[Fe_con] == 0)]
+        lipid_stats = plot_with_regression(
+            data=lipid_data,
+            x_col='Lipid (fraction)',
+            y_col=param,
+            group_col='Lipid type',
+            title=f'{param} vs. Lipid Fraction',
+            xlabel='Lipid Fraction',
+            ylabel=param,
+            plot_dir='plots/preanalysis/lipid_fraction',
+            filename_prefix=param[:3],
+            return_stats=True
+        )
+        for group, (intercept, slope, r2) in lipid_stats.items():
+            all_stats.append({
+                "group_type": "Lipid type",
+                "group": group,
+                "MRI_param": param,
+                "intercept": intercept,
+                "slope": slope,
+                "r2": r2
+            })
+
+        # Plot vs. Iron when Lipid = 0
+        iron_data_no_lipid = data[data[Lipid_con] == 0]
+        iron_stats_0 = plot_with_regression(
+            data=iron_data_no_lipid,
+            x_col='[Fe] (mg/ml)',
+            y_col=param,
+            group_col='Iron type',
+            title=f'{param} vs. [Fe] (mg/ml)',
+            xlabel='[Fe] (mg/ml)',
+            ylabel=param,
+            plot_dir='plots/preanalysis/iron_concentration/no_lipid',
+            filename_prefix=param[:3],
+            return_stats=True
+        )
+        for group, (intercept, slope, r2) in iron_stats_0.items():
+            all_stats.append({
+                "group_type": "Iron type (lipid=0)",
+                "group": group,
+                "MRI_param": param,
+                "intercept": intercept,
+                "slope": slope,
+                "r2": r2
+            })
+
+        # Plot vs. Iron when Lipid = 0.25
+        iron_data_lipid25 = data[data[Lipid_con] == 0.25]
+        plot_with_regression(
+            data=iron_data_lipid25,
+            x_col='[Fe] (mg/ml)',
+            y_col=param,
+            group_col='Iron type',
+            title=f'{param} vs. [Fe] (mg/ml), 25% Lipid',
+            xlabel='[Fe] (mg/ml)',
+            ylabel=param,
+            plot_dir='plots/preanalysis/iron_concentration/25_percent_lipid',
+            filename_prefix=param[:3]
+        )
+    stats_df = pd.DataFrame(all_stats)
+        # Pivot the table to match your desired structure
+    pivot_df = stats_df.pivot_table(
+        index=["group_type", "group"],
+        columns="MRI_param",
+        values=["intercept", "slope", "r2"]
+    )
+        # Flatten multi-index columns
+    pivot_df.columns = [f"{col[1]}_{col[0]}" for col in pivot_df.columns]
+    pivot_df.reset_index(inplace=True)
+    pivot_df = pivot_df.round(2)
+
+    return pivot_df
 
 
 if __name__ == "__main__":
     print("s")  
-    # # Read the data file into a pandas dataframe
     data = pd.read_excel('data.xlsx', sheet_name=0)
     # Remove Oshrat experiments
     data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
     data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11))]
+    preanalysis_table = preanalysis(data)
+    preanalysis_table.to_excel("plots/preanalysis/regression_summary_table.xlsx", index=False)
+    print("✅ Summary table saved to 'regression_summary_table.xlsx'")
     # Check pure components 
     # pure_components(data)
 
-    # Check multiple components
-    rmse_dict = multiple_components(data)
-    # plot_summary_rmse(rmse_dict)
-    print("done")
-
-
-
-
-
-
-
-
-
-
+    # # Check multiple components
+    # rmse_dict = multiple_components(data)
+    # # plot_summary_rmse(rmse_dict)
+    # print("done")

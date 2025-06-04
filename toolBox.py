@@ -34,3 +34,10 @@ MT = 'MT (p.u.)'
 qMRI_params = [R1, R2, R2s, MT]
 _qMRI_params = [R1]
 
+
+# data cols
+Fe_con = "[Fe] (mg/ml)"
+Fe_protein_con = "[Protein](mg/ml)"
+Lipid_con = "Lipid (fraction)"
+
+
