@@ -129,7 +129,7 @@ def calc_scan_rescan_rmse(data, data_2, R1):
     if len(data) != len(data_2):
         data, data_2 = make_datasets_same_size(data, data_2)
         return -10
-    return root_mean_squared_error((data[R1].values, data_2[R1].values)) # rRMSE!!
+    # return root_mean_squared_error(data[R1].values, data_2[R1].values) # rRMSE!!
     # Compute RMSEs
     scan_rescan_rmse = np.sqrt(np.mean((data[R1].values - data_2[R1].values) ** 2))
     return scan_rescan_rmse
@@ -300,7 +300,7 @@ def dict_to_boxplot(rmse_dict):
         plt.ylabel('RMSE')
         plt.xlabel('Tissue type')
         plt.grid(True)
-        plt.show()
+        # plt.show()
         plt.close()
 
 def pure_components(data):
@@ -348,33 +348,87 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
     rounded_weights = np.round(weights, 2)
     return rmse_list, rounded_weights
 
-def plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction):
-     # boxplot the RMSEs
-            plt.figure(figsize=(10, 6))
-            plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}')
-            plt.boxplot([rMSE_lipid,rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction], tick_labels=[f"Lipid\n{weights_lipid}",f"iron\n{weights_iron}"
-                                                                                                           , f'Lipid+Iron\n{weights_lipid_iron}', f'Lipid*Iron\n{weights_lipid_iron_interaction}'])
-            # add weights to the plot, under the tick labels
-            # for i, weight in enumerate([weights_lipid,weights_iron,weights_lipid_iron,weights_lipid_iron_interaction]):
-            #     weight_text = ', '.join([f'{w:.2f}' for w in weight])  
-            #     plt.text(i+1, 0.04, f'Weights: {weight_text}', ha='center', va='bottom', fontsize=8)
-            plt.ylabel('RMSE')
-            plt.xlabel('Model')
-            plt.grid(True)
-            # plt.show()
-            # save the plot in the directory 'plots/multiple_components/{expNum}'
-            plot_dir = f'plots/multiple_components/exp{expNum}'
-            if not os.path.exists(plot_dir):
-                os.makedirs(plot_dir)
-            filename = f"{param}_{expNum}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
-            plt.savefig(os.path.join(plot_dir, filename))
-            fig_path = os.path.join(plot_dir, filename.replace('.png', '.fig.pickle'))
-            with open(fig_path, 'wb') as f:
-                pickle.dump(plt.gcf(), f)
-            # plt.show()
-            plt.close()
+def plot_the_boxes(
+    iron_type, lipid_type, expNum, param,
+    rMSE_lipid, rMSE_iron, rMSE_lipid_iron, rMSE_lipid_iron_interaction,
+    weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction,
+    non_zero
+):
+    from statannotations.Annotator import Annotator
+    from scipy.stats import kruskal
 
-def multiple_components(data):
+    # Prepare data for boxplot and annotation
+    all_rmse = rMSE_lipid + rMSE_iron + rMSE_lipid_iron + rMSE_lipid_iron_interaction
+    model_labels = (
+        ["Lipid"] * len(rMSE_lipid) +
+        ["Iron"] * len(rMSE_iron) +
+        ["Lipid+Iron"] * len(rMSE_lipid_iron) +
+        ["Lipid*Iron"] * len(rMSE_lipid_iron_interaction)
+    )
+    df = pd.DataFrame({
+        "RMSE": all_rmse,
+        "Model": model_labels
+    })
+
+    # Create figure
+    plt.figure(figsize=(10, 6))
+    ax = sns.boxplot(x="Model", y="RMSE", data=df)
+
+    # Define pairwise comparisons
+    pairs = [
+        ("Lipid", "Iron"),
+        ("Iron", "Lipid+Iron"),
+        ("Lipid+Iron", "Lipid*Iron"),
+        ("Lipid", "Lipid*Iron")
+    ]
+
+    # Add statistical annotations
+    annotator = Annotator(ax, pairs, data=df, x="Model", y="RMSE")
+    annotator.configure(test='Mann-Whitney', 
+                        text_format='star', loc='outside',
+                        line_height = 0.01,
+                        verbose=0,hide_non_significant=True) 
+    annotator.apply_and_annotate()
+
+    # Adjust y-limits for annotation visibility (smarter buffer)
+    y_min, y_max = ax.get_ylim()
+    y_range = y_max - y_min
+    y_buffer = min(0.15 * y_range, 0.1 * y_max)  # Cap excessive padding
+    ax.set_ylim(y_min, y_max + 0.2*(y_max - y_min))
+
+    # Clean axis labels
+    tick_labels = [
+        f"Lipid\n[{', '.join(f'{w:.2f}' for w in weights_lipid)}]",
+        f"Iron\n[{', '.join(f'{w:.2f}' for w in weights_iron)}]",
+        f"Lipid+Iron\n[{', '.join(f'{w:.2f}' for w in weights_lipid_iron)}]",
+        f"Lipid*Iron\n[{', '.join(f'{w:.2f}' for w in weights_lipid_iron_interaction)}]"
+    ]
+    ax.set_xticklabels(tick_labels)
+
+    plt.title(f'RMSE for expNum {expNum}, {param}\niron type: {iron_type}, lipid type: {lipid_type}', fontsize = 11)
+    plt.ylabel('RMSE')
+    plt.xlabel('Model')
+    plt.grid(True)
+    plt.subplots_adjust(top=0.82)
+      # Add space at top
+
+    # Save the plot
+    if non_zero:
+        plot_dir = f'plots/multiple_components/non-zero/exp{expNum}'
+    else:
+        plot_dir = f'plots/multiple_components/exp{expNum}'
+
+    filename = f"{param}_{expNum}.png".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
+    save_file(plot_dir, filename)
+
+
+def multiple_components(data, non_zero = True):
+    if non_zero:
+        # Filter out rows where [Fe] (mg/ml) or Lipid (fraction) is zero
+        data = data[
+        (data["[Fe] (mg/ml)"] != 0) &
+        (data["Lipid (fraction)"] != 0)
+        ]
     #for each expNum, print header of the dataframe, and the data frame itself.
     data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
     rmse_dict = defaultdict(list)  # key: (lipid_type, iron_type), value: list of 4 median RMSEs
@@ -399,15 +453,15 @@ def multiple_components(data):
             iron_type = cur_data["Iron type"].iloc[0]
             lipid_type = cur_data["Lipid type"].iloc[0]
 
-            # plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, 
-            #                rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction)
+            plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, 
+                           rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction,non_zero)
            
-                        # Save median RMSEs for summary
+            # Save median RMSEs for summary
             medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
             rmse_dict[(lipid_type, iron_type)].append(medians)
-        plot_summary_rmse(rmse_dict,param)
+        # plot_summary_rmse(rmse_dict,param,non_zero)
 
-def plot_summary_rmse(rmse_dict,param):
+def plot_summary_rmse(rmse_dict,param,non_zero):
     from collections import defaultdict
 
     # Group by lipid type
@@ -424,9 +478,10 @@ def plot_summary_rmse(rmse_dict,param):
     markers = ['o', 's', '^', 'D']  # circle, square, triangle, diamond
     colors = ['black', 'blue', 'green', 'red']
 
-    summary_dir = f'plots/summary/{param}/'
-    os.makedirs(summary_dir, exist_ok=True)
-
+    if non_zero:
+        summary_dir = f'plots/summary/non-zero/{param}/'
+    else:
+        summary_dir = f'plots/summary/{param}/'
     for lipid_type, entries in grouped_data.items():
         iron_types = [e[0] for e in entries]
         rmse_values = np.array([e[1] for e in entries])  # shape: (num_iron_types, 4)
@@ -450,10 +505,9 @@ def plot_summary_rmse(rmse_dict,param):
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
-
-        filename = f'summary_RMSE_{lipid_type}.png'.replace(" ", "_")
-        plt.savefig(os.path.join(summary_dir, filename))
-        plt.close()
+        
+        filename = f'summary_RMSE_non-zeros_{lipid_type}.png'.replace(" ", "_")
+        save_file(summary_dir, filename)
 
 def sanitize_filename(filename):
     """
@@ -498,7 +552,6 @@ def plot_with_regression(data, x_col, y_col, group_col, title, xlabel, ylabel, p
     plt.ylabel(ylabel)
     plt.grid(True)
     plt.legend(title=group_col)
-    # os.makedirs(plot_dir, exist_ok=True)
     filename = f"{sanitize_filename(filename_prefix)}-vs-{sanitize_filename(x_col)}.png"
     save_file(plot_dir, filename)
     if return_stats:
@@ -582,20 +635,96 @@ def preanalysis(data):
 
     return pivot_df
 
+def data_preprcess(data):
+    data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
+    data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11))] # 11 was neglected due to lipid concetration mistake, 6 was neglected lipid type might be wrong
+    return data
+
+def mixed_linear_model(data, X_cols, y_col):
+    X = data[X_cols]
+    y = data[y_col]
+
+    import statsmodels.api as sm
+
+    # Add constant (intercept)
+    X_with_intercept = sm.add_constant(X)
+
+    # Fit OLS model
+    ols_model = sm.OLS(y, X_with_intercept).fit()
+
+    # Get results
+    r_squared = ols_model.rsquared
+    p_values = ols_model.pvalues
+    coefficients = ols_model.params  # includes intercept
+    overall_p_value = ols_model.f_pvalue         # p-value for the overall model (F-test)
+
+
+    # Optional: full summary
+    print(ols_model.summary())
+    return r_squared, coefficients, p_values, overall_p_value
+
+def multiple_components_mixed(data, non_zero = True):
+    if non_zero:
+        # Filter out rows where [Fe] (mg/ml) or Lipid (fraction) is zero
+        data = data[
+        (data["[Fe] (mg/ml)"] != 0) &
+        (data["Lipid (fraction)"] != 0)
+        ]
+    #for each expNum, print header of the dataframe, and the data frame itself.
+    data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
+    rmse_dict = defaultdict(list)  # key: (lipid_type, iron_type), value: list of 4 median RMSEs
+
+    for param in qMRI_params:
+        for expNum in data['ExpNum'].unique():
+            cur_data = data[data['ExpNum'] == expNum]
+            # only lipid
+            x_cols = ['Lipid (fraction)']
+            r_squared, coefficients, p_values, overall_p_value =  mixed_linear_model(cur_data, x_cols, param)
+            # only iron
+            x_cols = ['[Fe] (mg/ml)']
+            r_squared, coefficients, p_values, overall_p_value =  mixed_linear_model(cur_data, x_cols, param)
+            # lipid,iron
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
+            r_squared, coefficients, p_values, overall_p_value =  mixed_linear_model(cur_data,x_cols, param)
+            # lipid and lipid*iron
+            x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
+            r_squared, coefficients, p_values, overall_p_value =  mixed_linear_model(cur_data,x_cols, param)
+            iron_type = cur_data["Iron type"].iloc[0]
+            lipid_type = cur_data["Lipid type"].iloc[0]
+
+            # plot_the_boxes(iron_type,lipid_type, expNum, param, rMSE_lipid, rMSE_iron, rMSE_lipid_iron, 
+            #                rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction,non_zero)
+           
+            # Save median RMSEs for summary
+            medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
+            rmse_dict[(lipid_type, iron_type)].append(medians)
+        # plot_summary_rmse(rmse_dict,param,non_zero)
+
+
 
 if __name__ == "__main__":
-    print("s")  
+    ### Load data ###
+    print("Loading data from 'data.xlsx'...")
     data = pd.read_excel('data.xlsx', sheet_name=0)
-    # Remove Oshrat experiments
-    data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
-    data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11))]
-    preanalysis_table = preanalysis(data)
-    preanalysis_table.to_excel("plots/preanalysis/regression_summary_table.xlsx", index=False)
-    print("✅ Summary table saved to 'regression_summary_table.xlsx'")
-    # Check pure components 
+    data = data_preprcess(data)
+    
+    ##### preanalysis #####
+    # print("Running preanalysis...")
+    # preanalysis_table = preanalysis(data)
+    # preanalysis_table.to_excel("plots/preanalysis/regression_summary_table.xlsx", index=False)
+    # print("✅ Summary table saved to 'regression_summary_table.xlsx'")
+
+    ##### pure components, also called AIM 1 #####
+    print("Running pure components analysis...")
     # pure_components(data)
 
-    # # Check multiple components
-    # rmse_dict = multiple_components(data)
-    # # plot_summary_rmse(rmse_dict)
-    # print("done")
+    ##### multiple components, also called AIM 2 #####
+    print("Running multiple components analysis...")
+    # rmse_dict = multiple_components(data, non_zero=False)
+    
+    # Another way to analyse is as mixed linear model. we check R_squered and p-value of model without k-fold cross validation.
+    print("Running mixed linear model analysis...")
+    multiple_components_mixed(data, non_zero=False)
+
+    
+    print("done")
