@@ -338,6 +338,7 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 4 ):
     kf = KFold(n_splits=k, shuffle=True, random_state=42)
     # initialize an empty list with wheits of the model
     weights = np.zeros(len(X_cols))
+    coef_list = []
     rmse_list = []
 
     for train_index, test_index in kf.split(data):
@@ -351,9 +352,10 @@ def kfoldCV_fit_model(data, X_cols, y_col, k = 4 ):
         y_pred = model.predict(X_test)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         rmse_list.append(rmse)
+        coef_list.append(model.coef_)
     weights /= k  # Average the weights over k folds
     rounded_weights = np.round(weights, 2)
-    return rmse_list, rounded_weights
+    return rmse_list, rounded_weights, coef_list
 
 def plot_the_boxes(
     iron_type, lipid_type, expNum, param,
@@ -431,7 +433,7 @@ def plot_the_boxes(
 
 def multiple_components(data, non_zero = True):
     rmse_dict = defaultdict(list)  # key: (lipid_type, iron_type), value: list of 4 median RMSEs
-
+    k = 4
     for param in qMRI_params:
         data = data_dict[param]  # Get the DataFrame for the current MRI parameter
         if non_zero:
@@ -449,18 +451,35 @@ def multiple_components(data, non_zero = True):
                 continue
             # only lipid
             x_cols = ['Lipid (fraction)']
-            rMSE_lipid,weights_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
+            rMSE_lipid,weights_lipid, coef_list_lipid =  kfoldCV_fit_model(cur_data, x_cols, param, k = k)
+            # crate a df with rMSE_lipid, coef_list_lipid
+            rMSE_lipid_df = pd.DataFrame({'rMSE_lipid': rMSE_lipid, 'coef_lipid': coef_list_lipid})
             # only iron
             x_cols = ['[Fe] (mg/ml)']
-            rMSE_iron,weights_iron =  kfoldCV_fit_model(cur_data, x_cols, param)
+            rMSE_iron,weights_iron, coef_list_iron =  kfoldCV_fit_model(cur_data, x_cols, param, k = k)
+            rMSE_iron_df = pd.DataFrame({'rMSE_iron': rMSE_iron, 'coef_iron': coef_list_iron})
             # lipid,iron
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)']
-            rMSE_lipid_iron,weights_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param)
+            rMSE_lipid_iron,weights_lipid_iron, coef_list_lipid_iron =  kfoldCV_fit_model(cur_data,x_cols, param, k = k)
+            rMSE_lipid_iron_df = pd.DataFrame({'rMSE_lipid_iron': rMSE_lipid_iron, 'coef_lipid_iron': coef_list_lipid_iron})
             # lipid and lipid*iron
             # first create a new column in the data frame, that is the product of the lipid and iron columns.
             # data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
             x_cols = ['Lipid (fraction)', '[Fe] (mg/ml)', 'Lipid*Iron']
-            rMSE_lipid_iron_interaction,weights_lipid_iron_interaction =  kfoldCV_fit_model(cur_data,x_cols, param)
+            rMSE_lipid_iron_interaction,weights_lipid_iron_interaction, coef_list_lipid_iron_ineraction =  kfoldCV_fit_model(cur_data,x_cols, param, k = k)
+            rMSE_lipid_iron_interaction_df = pd.DataFrame({'rMSE_ipid_iron_interaction': rMSE_lipid_iron_interaction, 'coef_lipid_iron_interaction': coef_list_lipid_iron_ineraction})
+            # collect the RMSEs and weights dfs into one df, add a column with title of "k-fold", and for each row add 1,2,3,4
+            rMSE_df = pd.concat([rMSE_lipid_df, rMSE_iron_df, rMSE_lipid_iron_df, rMSE_lipid_iron_interaction_df], axis=1)
+            rMSE_df['k-fold'] = range(1, k +1)  
+            # save the rMSE_df to a csv file
+            if non_zero:
+                plot_dir = f'plots/multiple_components/non-zero/exp{expNum}'
+            else:
+                plot_dir = f'plots/multiple_components/exp{expNum}'
+            filename = f"{param}_{expNum}_RMSEs.csv".replace(" ", "_").replace("(", "").replace(")", "").replace("/", "-")
+            plot_dir = create_nested_dir(plot_dir)
+            rMSE_df.to_csv(os.path.join(plot_dir, filename), index=False)
+
             iron_type = cur_data["Iron type"].iloc[0]
             lipid_type = cur_data["Lipid type"].iloc[0]
 
@@ -470,6 +489,7 @@ def multiple_components(data, non_zero = True):
             # Save median RMSEs for summary
             medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
             rmse_dict[(lipid_type, iron_type)].append(medians)
+
         plot_summary_rmse(rmse_dict,param,non_zero)
 
 def plot_summary_rmse(rmse_dict,param,non_zero):
