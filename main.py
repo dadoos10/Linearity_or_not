@@ -43,13 +43,13 @@ def extract_zero_com_exp(exp = 1, data = None, lipid = False):
 
 
 
-def group_and_mean(data_1, data_2, column_name):
+def group_and_mean(data_1, data_2, column_name,param):
     # Group by ExpNum and column_name, calculating the mean for only the qMRI_params columns
-    data_1_qMRI = data_1.groupby(["ExpNum", column_name], as_index=False)[qMRI_params].mean(numeric_only=True)
-    data_2_qMRI = data_2.groupby(["ExpNum", column_name], as_index=False)[qMRI_params].mean(numeric_only=True)
+    data_1_qMRI = data_1.groupby(["ExpNum", column_name], as_index=False)[[param]].mean(numeric_only=True)
+    data_2_qMRI = data_2.groupby(["ExpNum", column_name], as_index=False)[[param]].mean(numeric_only=True)
 
     # Keep non-numeric columns (if any), retaining the first value for each group (or you can use .last() instead)
-    non_qMRI_columns = [col for col in data_1.columns if col not in qMRI_params]
+    non_qMRI_columns = [col for col in data_1.columns if col != param]
 
     # Group by ExpNum and column_name, and take the first value for non-numeric columns
     data_1_non_qMRI = data_1.groupby(["ExpNum", column_name], as_index=False)[non_qMRI_columns].first()
@@ -60,7 +60,7 @@ def group_and_mean(data_1, data_2, column_name):
     data_2_final = pd.merge(data_2_qMRI, data_2_non_qMRI, on=["ExpNum", column_name])
     return data_1_final, data_2_final
 
-def handle_duplicates_and_sort(data_1, data_2, lipid=True):
+def handle_duplicates_and_sort(data_1, data_2, param,lipid=True):
     """
     Handles duplicates and sorts data by Lipid fraction or Fe values.
     
@@ -73,7 +73,7 @@ def handle_duplicates_and_sort(data_1, data_2, lipid=True):
     column_name = subset[lipid][0]  # Extract the correct column name
     
 
-    data_1, data_2 = group_and_mean(data_1, data_2, column_name)
+    data_1, data_2 = group_and_mean(data_1, data_2, column_name,param)
 
     # # Ensure both datasets have rows in common based on the selected column
     # common_values = pd.merge(data_1, data_2, on=column_name, how='inner')[column_name]
@@ -256,6 +256,8 @@ def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
         index=qMRI_params
     )
     for param in qMRI_params:
+        ax = None  # Initialize ax to None for each parameter
+        data = data_dict[param]  # Get the DataFrame for the current MRI parameter
         rmses = []
         for i in range(len(exps_pair)):
             # define data_2 as the i experiment
@@ -268,8 +270,10 @@ def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
             ]
             data_1 = pd.concat(data_1_list, ignore_index=True)
 
-            data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,lipid)
-                
+            data_1,data_2 = handle_duplicates_and_sort(data_1, data_2,param,lipid)
+            if data_1.empty or data_2.empty:
+                print("⚠️ plot_qMRI_to_bio skipped: one of the inputs is empty.")
+                continue
             fig,ax,rmse_fitted, scan_rescan_rmse, (param_name, tissue_col, tissue_type) =  plot_qMRI_to_bio(data_1, data_2, param, exps_pair,i, lipid = lipid)
             rmses.append(rmse_fitted)
             # if isinstance(rmse_table.loc[param, "Fitted RMSE"], list):
@@ -279,6 +283,9 @@ def run_scan_rescan(data,exps_pair,rmse_dict,lipid = True):
 
         # mean_rmse_fitted = np.mean(rmse_table.loc[param, "Fitted RMSE"]) if rmse_table.loc[param, "Fitted RMSE"] else 0
         mean_rmse_fitted = np.mean(rmses) if rmses else 0
+        if ax is None:
+            print("⚠️ No valid data to plot.")
+            continue
         ax.set_title(f'{param_name} vs. {tissue_col}, {tissue_type}\n average RMSE (fit): {mean_rmse_fitted:.2f}')
         define_dir_and_save(lipid, param_name, tissue_type)
         rmse_dict.setdefault(param, []).append((tissue_type, rmses))
@@ -318,7 +325,7 @@ def pure_components(data):
 
     dict_to_boxplot(rmse_dict)
 
-def kfoldCV_fit_model(data, X_cols, y_col, k = 5 ):
+def kfoldCV_fit_model(data, X_cols, y_col, k = 4 ):
     """
     Perform k-fold cross-validation to fit a model and calculate RMSE.
     
@@ -423,19 +430,23 @@ def plot_the_boxes(
 
 
 def multiple_components(data, non_zero = True):
-    if non_zero:
-        # Filter out rows where [Fe] (mg/ml) or Lipid (fraction) is zero
-        data = data[
-        (data["[Fe] (mg/ml)"] != 0) &
-        (data["Lipid (fraction)"] != 0)
-        ]
-    #for each expNum, print header of the dataframe, and the data frame itself.
-    data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
     rmse_dict = defaultdict(list)  # key: (lipid_type, iron_type), value: list of 4 median RMSEs
 
     for param in qMRI_params:
+        data = data_dict[param]  # Get the DataFrame for the current MRI parameter
+        if non_zero:
+        # Filter out rows where [Fe] (mg/ml) or Lipid (fraction) is zero
+            data = data[
+            (data["[Fe] (mg/ml)"] != 0) &
+            (data["Lipid (fraction)"] != 0)
+            ]
+        #for each expNum, print header of the dataframe, and the data frame itself.
+        data['Lipid*Iron'] = data['Lipid (fraction)'] * data['[Fe] (mg/ml)']
         for expNum in data['ExpNum'].unique():
             cur_data = data[data['ExpNum'] == expNum]
+            if cur_data.shape[0] < 7:
+                print(f"⚠️ Not enough data for expNum {expNum} in {param}. Skipping...")
+                continue
             # only lipid
             x_cols = ['Lipid (fraction)']
             rMSE_lipid,weights_lipid =  kfoldCV_fit_model(cur_data, x_cols, param)
@@ -459,7 +470,7 @@ def multiple_components(data, non_zero = True):
             # Save median RMSEs for summary
             medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
             rmse_dict[(lipid_type, iron_type)].append(medians)
-        # plot_summary_rmse(rmse_dict,param,non_zero)
+        plot_summary_rmse(rmse_dict,param,non_zero)
 
 def plot_summary_rmse(rmse_dict,param,non_zero):
     from collections import defaultdict
@@ -557,17 +568,17 @@ def plot_with_regression(data, x_col, y_col, group_col, title, xlabel, ylabel, p
     if return_stats:
         return stats
 
-def preanalysis(data):
+def preanalysis(data_dict):
     all_stats = []
-    for param in qMRI_params:
-        # Plot vs. Lipid (fraction) when iron concentrations are zero
-        lipid_data = data[(data[Fe_protein_con] == 0) | (data[Fe_con] == 0)]
+    for param, data in data_dict.items():
+                # Plot vs. Lipid (fraction) when iron concentrations are zero
+        lipid_data = data[(data[Fe_protein_con] == 0) & (data[Fe_con] == 0)]
         lipid_stats = plot_with_regression(
             data=lipid_data,
             x_col='Lipid (fraction)',
             y_col=param,
             group_col='Lipid type',
-            title=f'{param} vs. Lipid Fraction',
+            title=f'{param} vs. Lipid Fraction n = {len(lipid_data)}',
             xlabel='Lipid Fraction',
             ylabel=param,
             plot_dir='plots/preanalysis/lipid_fraction',
@@ -591,7 +602,7 @@ def preanalysis(data):
             x_col='[Fe] (mg/ml)',
             y_col=param,
             group_col='Iron type',
-            title=f'{param} vs. [Fe] (mg/ml)',
+            title=f'{param} vs. [Fe] (mg/ml) n = {len(iron_data_no_lipid)}',
             xlabel='[Fe] (mg/ml)',
             ylabel=param,
             plot_dir='plots/preanalysis/iron_concentration/no_lipid',
@@ -615,7 +626,7 @@ def preanalysis(data):
             x_col='[Fe] (mg/ml)',
             y_col=param,
             group_col='Iron type',
-            title=f'{param} vs. [Fe] (mg/ml), 25% Lipid',
+            title=f'{param} vs. [Fe] (mg/ml), 25% Lipid n = {len(iron_data_lipid25)}',
             xlabel='[Fe] (mg/ml)',
             ylabel=param,
             plot_dir='plots/preanalysis/iron_concentration/25_percent_lipid',
@@ -637,7 +648,7 @@ def preanalysis(data):
 
 def data_preprcess(data):
     data = data[~data['ExpNum'].astype(str).str.contains('[a-zA-Z]')]
-    data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11))] # 11 was neglected due to lipid concetration mistake, 6 was neglected lipid type might be wrong
+    data = data[~((data['ExpNum'] == 6) | (data['ExpNum'] == 11) |(data['ExpNum'] == 13) )] # 11 was neglected due to lipid concetration mistake, 6 was neglected lipid type might be wrong
     return data
 
 def mixed_linear_model(data, X_cols, y_col):
@@ -696,9 +707,122 @@ def multiple_components_mixed(data, non_zero = True):
             #                rMSE_lipid_iron_interaction, weights_lipid, weights_iron, weights_lipid_iron, weights_lipid_iron_interaction,non_zero)
            
             # Save median RMSEs for summary
-            medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
+            # medians = [np.median(rMSE_lipid), np.median(rMSE_iron), np.median(rMSE_lipid_iron), np.median(rMSE_lipid_iron_interaction)]
             rmse_dict[(lipid_type, iron_type)].append(medians)
-        # plot_summary_rmse(rmse_dict,param,non_zero)
+        plot_summary_rmse(rmse_dict,param,non_zero)
+def round_up_smart(x):
+    """
+    Round up to the nearest meaningful decimal step based on magnitude.
+    Examples:
+        0.762 -> 0.8
+        0.044 -> 0.05
+        0.003 -> 0.01
+    """
+    print(f"rounding up {x}")
+    order = np.floor(np.log10(x))
+    step = 10 ** (order - 1)
+    rounded_value = np.ceil(x / step) * step
+    print(f"rounded value: {rounded_value}")
+    return rounded_value if rounded_value > 0 else step  # Ensure we don't return zero
+
+def crop_df(data, y_col, crop = True):
+    if not crop:
+        # If cropping is not needed, return the original data and an empty dictionary
+        return data.copy(), {}
+    max_effects = {}
+    keep_indices = set(data.index)
+
+    for expNum in data['ExpNum'].unique():
+        exp_data = data[data['ExpNum'] == expNum]
+        # lipid_effect = exp_data[exp_data['[Fe] (mg/ml)'] == 0][y_col]
+
+        # if not lipid_effect.empty:
+        #     max_effect = round_up_smart(lipid_effect.max())*2
+        #     max_effects[expNum] = max_effect
+
+        #     drop_idx = data[(data['ExpNum'] == expNum) & (data[y_col] > max_effect)].index
+        #     keep_indices -= set(drop_idx)
+                # Decide which column to base cropping on
+        iron_type = str(exp_data['Iron type'].iloc[0]).lower()
+        if 'ferritin' in iron_type or 'transferrin' in iron_type:
+            col_to_crop = '[Protein](mg/ml)'
+        else:
+            col_to_crop = '[Fe] (mg/ml)'
+
+        if col_to_crop not in exp_data.columns:
+            continue  # skip if column missing
+
+        unique_vals = sorted(exp_data[col_to_crop].dropna().unique(), reverse=True)        
+        # Store the top 2 Fe levels (if available)
+        top_to_remove = unique_vals[:2]  # max and second max
+        max_effects[expNum] = top_to_remove
+
+        # Drop all rows with Fe in top 2 values
+        drop_idx = exp_data[exp_data[col_to_crop].isin(top_to_remove)].index
+        keep_indices -= set(drop_idx)
+
+    # Return only the rows that passed the filter, keeping their original index
+    data_cropped = data.loc[sorted(keep_indices)].copy()
+    return data_cropped, max_effects
+
+def crop(data):
+    # Define shared columns and target variables
+    shared_cols = ['ExpNum', "Iron type", 'Lipid type', 'Lipid (fraction)', '[Protein](mg/ml)', '[Fe] (mg/ml)']
+    crop = True  # Set to False if you want to skip cropping
+    # Apply cropping to each signal
+    data_R1, max_R1 = crop_df(data[shared_cols + [R1]].copy(), R1,crop)
+    data_R2, max_R2 = crop_df(data[shared_cols + [R2]].copy(), R2,crop)
+    data_R2s, max_R2s = crop_df(data[shared_cols + [R2s]].copy(), R2s,crop)
+    data_MT, max_MT = crop_df(data[shared_cols + [MT]].copy(), MT,crop)
+
+    # Find common indices across all four cropped dataframes
+    common_idx = set(data_R1.index) & set(data_R2.index) & set(data_R2s.index) & set(data_MT.index)
+
+    # Build summary table
+    all_exp = sorted(set(max_R1) | set(max_R2) | set(max_R2s) | set(max_MT))
+    summary_rows = []
+
+    
+    for exp in all_exp:
+        indices = [
+            idx for idx in common_idx if data_R1.loc[idx, 'ExpNum'] == exp
+        ]
+
+        def count_valid_rows(df):
+            df_exp = df[df['ExpNum'] == exp]
+            return df_exp[
+                (df_exp['Lipid (fraction)'] != 0) &
+                ((df_exp['[Fe] (mg/ml)'] != 0) | (df_exp['[Protein](mg/ml)'] != 0))
+            ].shape[0]
+        def count_rows(df):
+            # Count rows for a specific experiment
+            df_exp = df[df['ExpNum'] == exp]
+            return df_exp.shape[0]
+
+        summary_rows.append({
+            'ExpNum': exp,
+            'Max R1': max_R1.get(exp, np.nan),
+            'Max R2': max_R2.get(exp, np.nan),
+            'Max R2s': max_R2s.get(exp, np.nan),
+            'Max MT': max_MT.get(exp, np.nan),
+            'Common Indices': indices,
+            'R1 Rows (non-zero)': f"{count_rows(data_R1)}({count_valid_rows(data_R1)})",
+            'R2 Rows (non-zro)': f"{count_rows(data_R2)}({count_valid_rows(data_R2)})",
+            'R2s Rows (non-zero)': f"{count_rows(data_R2s)}({count_valid_rows(data_R2s)})",
+            'MT Rows (non-zero)': f"{count_rows(data_MT)}({count_valid_rows(data_MT)})"
+        })
+
+    summary_df = pd.DataFrame(summary_rows)
+
+    # Save everything
+    with pd.ExcelWriter('data_cropped.xlsx') as writer:
+        data_R1.to_excel(writer, sheet_name='R1', index=False)
+        data_R2.to_excel(writer, sheet_name='R2', index=False)
+        data_R2s.to_excel(writer, sheet_name='R2s', index=False)
+        data_MT.to_excel(writer, sheet_name='MT', index=False)
+        summary_df.to_excel(writer, sheet_name='Summary', index=False)
+
+    return data_R1, data_R2, data_R2s, data_MT, summary_df
 
 
 
@@ -707,24 +831,32 @@ if __name__ == "__main__":
     print("Loading data from 'data.xlsx'...")
     data = pd.read_excel('data.xlsx', sheet_name=0)
     data = data_preprcess(data)
+    data_R1, data_R2, data_R2s, data_MT, summary_df = crop(data)
+    print("✅ Data loaded successfully")
     
-    ##### preanalysis #####
-    # print("Running preanalysis...")
-    # preanalysis_table = preanalysis(data)
+    #### preanalysis #####
+    print("Running preanalysis...")
+    data_dict = {
+        R1: data_R1,
+        R2: data_R2,
+        R2s: data_R2s,
+        MT: data_MT
+    }
+    preanalysis_table = preanalysis(data_dict)
     # preanalysis_table.to_excel("plots/preanalysis/regression_summary_table.xlsx", index=False)
     # print("✅ Summary table saved to 'regression_summary_table.xlsx'")
 
     ##### pure components, also called AIM 1 #####
     print("Running pure components analysis...")
-    # pure_components(data)
+    # pure_components(data_dict)
 
     ##### multiple components, also called AIM 2 #####
     print("Running multiple components analysis...")
-    # rmse_dict = multiple_components(data, non_zero=False)
+    rmse_dict = multiple_components(data_dict, non_zero=True)
     
     # Another way to analyse is as mixed linear model. we check R_squered and p-value of model without k-fold cross validation.
     print("Running mixed linear model analysis...")
-    multiple_components_mixed(data, non_zero=False)
+    # multiple_components_mixed(data, non_zero=False)
 
     
     print("done")
